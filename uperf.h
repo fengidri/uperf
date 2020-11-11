@@ -35,6 +35,7 @@ struct config{
 	int depth;
 	int rate;
 	int sport;
+    int gso;
 };
 extern struct config config;
 
