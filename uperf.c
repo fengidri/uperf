@@ -5,7 +5,7 @@ struct config config = {
 	.thread_n = 1,
 	.msglen = 16,
 	.depth = 1,
-	.sport = 8080,
+	.sport = 0,
 };
 
 static struct module *mod;
@@ -344,8 +344,22 @@ static void udp_echo(void *_)
 
 static void alarm_handler(int sig)
 {
-	printf("reqs: %lldw %lld\n", config.reqs/10000, config.reqs);
-	config.reqs = 0;
+    u64 cycle;
+    u64 reqs;
+
+    reqs = config.reqs - config.reqs_last;
+
+    config.reqs_last = config.reqs;
+
+    if (config.reqs)
+        cycle = config.cycle / config.reqs;
+    else
+        cycle = 0;
+
+	printf("reqs: %lldw %lld cycle/reqs: %llu\n",
+           reqs/10000,
+           reqs,
+           cycle);
 	alarm(1);
 }
 
@@ -391,6 +405,10 @@ int main(int argc, char *argv[])
 			continue;
 		}
 
+		if (strcmp(p, "--udp-connect") == 0) {
+			config.udp_connect = 1;
+			continue;
+		}
 
 		if (++i >= argc) {
 			printf("except args for %s\n", p);
@@ -425,7 +443,7 @@ int main(int argc, char *argv[])
 			continue;
 		}
 		if (strcmp(p, "--rate") == 0) {
-			config.rate = atoi(v) * 10000;
+			config.rate = atoi(v);
 			continue;
 		}
 
@@ -435,6 +453,15 @@ int main(int argc, char *argv[])
 		}
 		if (strcmp(p, "--msglen") == 0) {
 			config.msglen = atoi(v);
+			continue;
+		}
+
+		if (strcmp(p, "--sendmsg") == 0) {
+			config.sendmsg = atoi(v);
+			continue;
+		}
+		if (strcmp(p, "--sendmmsg") == 0) {
+			config.sendmmsg = atoi(v);
 			continue;
 		}
 	}

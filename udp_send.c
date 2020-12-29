@@ -1,6 +1,9 @@
+#define _GNU_SOURCE
 #include "uperf.h"
 #include "linux/udp.h"
+#include <sys/socket.h>
 #define SOL_UDP 17
+
 
 
 static __thread int count;
@@ -73,7 +76,7 @@ static void udp_send()
     /* bind */
     memset(&caddr, 0, sizeof(caddr));
 	caddr.sin_family = AF_INET;
-	caddr.sin_port = 0;
+	caddr.sin_port = htons(config.sport);
 	caddr.sin_addr.s_addr = inet_addr("0.0.0.0");
 
 	ret = bind(sockfd, (struct sockaddr *)&caddr, sizeof(caddr));
@@ -90,15 +93,63 @@ static void udp_send()
     servaddr.sin_port = htons(config.port);
     servaddr.sin_addr.s_addr = inet_addr(config.server);
 
+    if (config.udp_connect) {
+        ret = connect(sockfd, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+	    if (ret) {
+		    printf("connect fail\n");
+		    return;
+	    }
+    }
+
 
 	gettimeofday(&start, NULL);
 
-    int n, len;
+    int n, len, i;
+    u64 cycle;
 
 	while (1) {
-    	sendto(sockfd, buffer, config.msglen, 0,
-		       (const struct sockaddr *) &servaddr, sizeof(servaddr));
-		__sync_fetch_and_add(&config.reqs, 1);
+        cycle = rdtsc();
+        n = 1;
+        if (config.udp_connect) {
+            if (config.sendmsg) {
+                struct msghdr msg = {};
+                struct iovec iovec[1000];
+                msg.msg_iovlen = config.sendmsg;
+                msg.msg_iov = iovec;
+                for (i =0; i < config.sendmsg; ++i) {
+                    iovec[i].iov_base = buffer;
+                    iovec[i].iov_len = config.msglen;
+                }
+
+                n = sendmsg(sockfd, &msg, 0);
+                n = n / config.msglen;
+
+            } else if (config.sendmmsg) {
+                struct mmsghdr vec[1000], *v;
+                struct iovec io;
+
+                io.iov_base = buffer;
+                io.iov_len = config.msglen;
+
+                for (i =0; i < config.sendmmsg; ++i) {
+                    v = vec + i;
+                    v->msg_hdr.msg_iov = &io;
+                    v->msg_hdr.msg_iovlen = 1;
+                }
+
+                n = sendmmsg(sockfd, vec, config.sendmmsg, 0);
+            }
+            else{
+                send(sockfd, buffer, config.msglen, 0);
+            }
+        }
+        else{
+    	    sendto(sockfd, buffer, config.msglen, 0,
+		           (const struct sockaddr *) &servaddr, sizeof(servaddr));
+        }
+        config.cycle += rdtsc() - cycle;
+
+		__sync_fetch_and_add(&config.reqs, n);
 
 	    if (config.rate)
             delay(&start);
