@@ -16,10 +16,9 @@ static void udp_pingpong(void *_)
         exit(EXIT_FAILURE);
     }
     memset(&caddr, 0, sizeof(caddr));
-	caddr.sin_family = AF_INET;
-	caddr.sin_port = 0;
+	caddr.sin_family      = AF_INET;
+	caddr.sin_port        = 0;
 	caddr.sin_addr.s_addr = inet_addr("0.0.0.0");
-
 
 	ret = bind(sockfd, (struct sockaddr *)&caddr, sizeof(caddr));
 	if (ret) {
@@ -48,15 +47,47 @@ static void udp_pingpong(void *_)
 
 #define recv() recvfrom(sockfd, buffer, sizeof(buffer), 0, NULL, NULL);
 
+    struct timeval start, end;
+    u64 spent, m;
+
+    gettimeofday(&start, NULL);
+
 	while (1) {
 		sendto();
 		n = recv();
+
+        if (++m > 1000) {
+            gettimeofday(&end, NULL);
+            spent = (end.tv_sec - start.tv_sec) * 1000 * 1000 + \
+                    end.tv_usec - start.tv_usec;
+
+		    __sync_fetch_and_add(&config.spent, spent);
+            start = end;
+            m = 0;
+        }
+
 		__sync_fetch_and_add(&config.reqs, 1);
 	}
     close(sockfd);
 }
 
+
+static void udp_pingpong_alarm(void *_)
+{
+    u64 reqs;
+    u64 spent;
+
+    reqs = config.reqs - config.reqs_last;
+    spent = config.spent;
+    config.spent = 0;
+
+    config.reqs_last = config.reqs;
+
+	printf("reqs: %lldw usec: %lluus\n", reqs/10000, spent / reqs);
+}
+
 struct module mod_udp_pingpong = {
 	.thread = udp_pingpong,
+    .alarm = udp_pingpong_alarm,
 };
 

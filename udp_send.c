@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "uperf.h"
 #include "linux/udp.h"
+#include "linux/ip.h"
 #include <sys/socket.h>
 #define SOL_UDP 17
 
@@ -41,11 +42,37 @@ static int delay(struct timeval *s)
     return 0;
 }
 
+
+#define MSG_PROBE	0x10	/* Do not send. Only probe path f.e. for MTU */
+
+static void udp_send_simple(int fd, int flags, struct sockaddr_in *servaddr)
+{
+    char *buffer = malloc(config.msglen);
+
+    while (1) {
+    	    sendto(fd, buffer, config.msglen, flags,
+		           (const struct sockaddr *) servaddr,
+                   sizeof(*servaddr));
+            __sync_fetch_and_add(&config.reqs, 1);
+    }
+}
+
+static void udp_send_connect(int fd, int flags)
+{
+    char *buffer = malloc(config.msglen);
+
+    while (1) {
+        send(fd, buffer, config.msglen, flags);
+        __sync_fetch_and_add(&config.reqs, 1);
+    }
+}
+
 static void udp_send()
 {
   	int sockfd, ret;
     char *buffer;
 	int v = 1;
+    int flags = config.flags;
     struct sockaddr_in   caddr,  servaddr;
 
     buffer = malloc(config.msglen);
@@ -60,6 +87,14 @@ static void udp_send()
 	ret = setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, &v, sizeof(v));
 	if (ret) {
 		printf("SO_REUSEPORT fail. %s\n", strerror(errno));
+		return;
+	}
+
+    v = IP_PMTUDISC_DO;
+
+    ret = setsockopt(sockfd, IPPROTO_IP, IP_MTU_DISCOVER, &v, sizeof(v));
+	if (ret) {
+		printf("IP_DONTFRAG fail. %s\n", strerror(errno));
 		return;
 	}
 
@@ -101,8 +136,24 @@ static void udp_send()
 	    }
     }
 
+    if (config.flag_oob)
+        flags |= MSG_OOB;
+
+    if (config.flag_probe)
+        flags |= MSG_PROBE;
+
+    if (config.flag_confirm)
+        flags |= MSG_CONFIRM;
+
 
 	gettimeofday(&start, NULL);
+
+    if (!config.udp_connect) {
+        udp_send_simple(sockfd, flags, &servaddr);
+        return ;
+    } else {
+        udp_send_connect(sockfd, flags);
+    }
 
     int n, len, i;
     u64 cycle;

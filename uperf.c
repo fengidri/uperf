@@ -6,6 +6,8 @@ struct config config = {
 	.msglen = 16,
 	.depth = 1,
 	.sport = 0,
+    .port = 8080,
+    .time = 10,
 };
 
 static struct module *mod;
@@ -346,21 +348,42 @@ static void alarm_handler(int sig)
 {
     u64 cycle;
     u64 reqs;
+    u64 us;
+    u64 latency;
+    static struct timeval now, last;
+
+    if (mod->alarm) {
+        mod->alarm(NULL);
+	    alarm(1);
+        return;
+    }
 
     reqs = config.reqs - config.reqs_last;
 
+    gettimeofday(&now, NULL);
+
+    us = (now.tv_usec - last.tv_usec) + (now.tv_sec - last.tv_sec) * 1000 * 1000;
+
+    last = now;
     config.reqs_last = config.reqs;
 
-    if (config.reqs)
-        cycle = config.cycle / config.reqs;
-    else
-        cycle = 0;
 
-	printf("reqs: %lldw %lld cycle/reqs: %llu\n",
-           reqs/10000,
-           reqs,
-           cycle);
+    latency = reqs ? us * 1000 / reqs : 0;
+    reqs = reqs * 1000 * 1000 / us;
+
+    if (reqs)
+        printf("reqs: %lldw %lld latency: %lluns us: %lld\n",
+               reqs/10000, reqs,
+               latency,
+               us);
+
+    if (now.tv_sec - config.start > config.time) {
+
+        exit(0);
+    }
+
 	alarm(1);
+
 }
 
 
@@ -407,6 +430,21 @@ int main(int argc, char *argv[])
 
 		if (strcmp(p, "--udp-connect") == 0) {
 			config.udp_connect = 1;
+			continue;
+		}
+
+		if (strcmp(p, "--flag-oob") == 0) {
+			config.flag_oob = 1;
+			continue;
+		}
+
+		if (strcmp(p, "--flag-probe") == 0) {
+			config.flag_probe = 1;
+			continue;
+		}
+
+		if (strcmp(p, "--flag-confirm") == 0) {
+			config.flag_confirm = 1;
 			continue;
 		}
 
@@ -464,11 +502,28 @@ int main(int argc, char *argv[])
 			config.sendmmsg = atoi(v);
 			continue;
 		}
+
+		if (strcmp(p, "--flags") == 0) {
+			config.flags |= strtol(v, NULL, 16);
+			continue;
+		}
+
+		if (strcmp(p, "--time") == 0) {
+			config.time = strtol(v, NULL, 10);
+			continue;
+		}
 	}
 
 	signal(SIGALRM, alarm_handler);
 	signal(SIGPIPE, SIG_IGN);
 	alarm(1);
+
+    {
+        struct timeval now;
+        gettimeofday(&now, NULL);
+        config.start = now.tv_sec;
+    }
+
 
 
 	pthread_t th[100] = {0};

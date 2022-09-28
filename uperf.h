@@ -16,6 +16,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <stdbool.h>
 
 #include <pthread.h>
 #include <time.h>
@@ -24,6 +25,7 @@
 
 #include <signal.h>
 typedef unsigned long long int u64;
+typedef unsigned int u32;
 struct config{
 	char *server;
 	int port;
@@ -31,11 +33,14 @@ struct config{
 	int thread_n;
 	int conn_n;
 	int channel;
-	int reqs;
+
 	int reqs_last;
     int udp_connect;
     int sendmsg;
     int sendmmsg;
+
+	u64 reqs;
+    u64 spent;
 
 	int msglen;
 	int depth;
@@ -43,6 +48,13 @@ struct config{
 	int sport;
     int gso;
     u64 cycle;
+    u32 start;
+    u32 time;
+
+    u32 flags;
+    bool flag_oob;
+    bool flag_probe;
+    bool flag_confirm;
 };
 extern struct config config;
 
