@@ -448,6 +448,11 @@ int main(int argc, char *argv[])
 			continue;
 		}
 
+		if (strcmp(p, "--stat") == 0) {
+			config.flag_confirm = 1;
+			continue;
+		}
+
 		if (++i >= argc) {
 			printf("except args for %s\n", p);
 			return -1;
@@ -519,9 +524,12 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	signal(SIGALRM, alarm_handler);
+    if (config.stat) {
+        signal(SIGALRM, alarm_handler);
+        alarm(1);
+    }
+
 	signal(SIGPIPE, SIG_IGN);
-	alarm(1);
 
     {
         struct timeval now;
@@ -529,13 +537,16 @@ int main(int argc, char *argv[])
         config.start = now.tv_sec;
     }
 
-
-
-	pthread_t th[100] = {0};
-
 	if (!mod->thread) {
 		return -1;
 	}
+
+    if (config.thread_n == 1) {
+        mod->thread(NULL);
+        return 0;
+    }
+
+	pthread_t th[100] = {0};
 
 	for (i = 0; i < config.thread_n; ++i)
 		pthread_create(th + i, NULL, (void *(*)(void*))mod->thread, NULL);

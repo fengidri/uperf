@@ -38,6 +38,7 @@ struct config{
     int udp_connect;
     int sendmsg;
     int sendmmsg;
+    int stat;
 
 	u64 reqs;
     u64 spent;
