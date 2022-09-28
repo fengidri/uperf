@@ -3,6 +3,7 @@
 #include "linux/udp.h"
 #include "linux/ip.h"
 #include <sys/socket.h>
+#include <net/if.h>
 #define SOL_UDP 17
 
 
@@ -89,6 +90,17 @@ static void udp_send()
 		printf("SO_REUSEPORT fail. %s\n", strerror(errno));
 		return;
 	}
+
+    if (config.ifname) {
+        struct ifreq ifr;
+
+        memset(&ifr, 0, sizeof(ifr));
+        snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), config.ifname);
+        if (setsockopt(sockfd, SOL_SOCKET, SO_BINDTODEVICE, (void *)&ifr, sizeof(ifr)) < 0) {
+            printf("SO_BINDTODEVICE fail. %s\n", strerror(errno));
+            return;
+        }
+    }
 
     v = IP_PMTUDISC_DO;
 

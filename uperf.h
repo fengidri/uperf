@@ -42,6 +42,8 @@ struct config{
 	u64 reqs;
     u64 spent;
 
+    const char *ifname;
+
 	int msglen;
 	int depth;
 	int rate;

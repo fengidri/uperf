@@ -460,6 +460,11 @@ int main(int argc, char *argv[])
 			continue;
 		}
 
+		if (strcmp(p, "--ifname") == 0) {
+			config.ifname = v;
+			continue;
+		}
+
 		if (strcmp(p, "-p") == 0) {
 			config.port = atoi(v);
 			continue;
