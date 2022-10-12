@@ -78,6 +78,7 @@ struct thread {
 
 
 struct module{
+    int (*args)(int args, char *argv[]);
 	int (*prepare)(void*);
 	void (*thread)(struct thread *);
 	void (*alarm)(void*);

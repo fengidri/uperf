@@ -465,20 +465,25 @@ static int thread_create(struct thread *th, int idx, void *(*fun)(void *))
     thread_create_with_cpu(&th->pthread, config.cpu_list[idx], fun, th);
 }
 
-
 extern struct module mod_udp_send;
 extern struct module mod_udp_recv;
 extern struct module mod_udp_pingpong;
 
-int main(int argc, char *argv[])
+int parse_args(int argc, char *argv[])
 {
-    int port = 8080, i, ret;
-	char *p = NULL, *v = NULL;
-
-	mod = &def;
+    char *p, *v;
+    int i;
 
 	for (i = 1; i < argc; ++i) {
 		p = argv[i];
+
+		if (strcmp(p, "--") == 0) {
+            if (!mod->args)
+                return -1;
+
+            if (mod->args(argc - i - 1, argv + i + 1))
+                return -1;
+		}
 
 		if (strcmp(p, "udp_send") == 0) {
 			mod = &mod_udp_send;
@@ -615,10 +620,25 @@ int main(int argc, char *argv[])
 			config.time = strtol(v, NULL, 10);
 			continue;
 		}
+
 	}
 
     if (config.thread_n == 1 && config.cpu_num)
         config.thread_n = config.cpu_num;
+
+    return 0;
+}
+
+
+int main(int argc, char *argv[])
+{
+    int port = 8080, i, ret;
+	char *p = NULL, *v = NULL;
+
+	mod = &def;
+
+    if (parse_args(argc, argv))
+        return -1;
 
     if (config.stat) {
         signal(SIGALRM, alarm_handler);
