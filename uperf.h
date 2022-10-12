@@ -70,6 +70,7 @@ struct config{
 extern struct config config;
 
 struct thread {
+	pthread_t pthread;
     int id;
     void *data;
 
@@ -77,7 +78,7 @@ struct thread {
 
 
 struct module{
-	void (*start)(void*);
+	int (*prepare)(void*);
 	void (*thread)(struct thread *);
 	void (*alarm)(void*);
 };

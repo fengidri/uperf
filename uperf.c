@@ -8,90 +8,11 @@ struct config config = {
 	.sport = 0,
     .port = 8080,
     .time = 10,
+    .server = "0.0.0.0",
 };
 
 static struct module *mod;
 static struct module def;
-
-#include <linux/filter.h>
-static void attach_cbpf(int fd,uint16_t mod)
-{
-    struct sock_filter code[] = {
-        /* A = raw_smp_processor_id() */
-        { BPF_LD  | BPF_W | BPF_ABS, 0, 0, SKF_AD_OFF + SKF_AD_CPU },
-        /* return A */
-        { BPF_RET | BPF_A, 0, 0, 0 },
-    };
-    struct sock_fprog p = {
-        .len = 2,
-        .filter = code,
-    };
-
-    mod = mod;
-    if (setsockopt(fd, SOL_SOCKET, SO_ATTACH_REUSEPORT_CBPF, &p, sizeof(p)))
-        perror("socket SO_ATTACH_REUSEPORT_CBPF failed");
-}
-
-static void udp_recv(struct thread *th)
-{
-  	int sockfd, rc, ret;
-    char buffer[22];
-    int v = 1;
-    int n;
-
-    struct sockaddr_in     servaddr;
-
-    int type;
-
-    type = SOCK_DGRAM;
-    if (config.nonblock)
-        type |= SOCK_NONBLOCK;
-
-    // Creating socket file descriptor
-    if ( (sockfd = socket(AF_INET, type, 0)) < 0 ) {
-        perror("socket creation failed");
-        exit(EXIT_FAILURE);
-    }
-
-	ret = setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, &v, sizeof(v));
-	if (ret) {
-		printf("SO_REUSEPORT fail. %s\n", strerror(errno));
-		return;
-	}
-
-
-    memset(&servaddr, 0, sizeof(servaddr));
-
-    // Filling server information
-    servaddr.sin_family = AF_INET;
-    servaddr.sin_port = htons(config.port);
-    servaddr.sin_addr.s_addr = inet_addr(config.server);
-
-	rc = bind(sockfd, (struct sockaddr*)&servaddr, sizeof(servaddr));
-	if (rc < 0) {
-        perror("socket bind failed");
-		return;
-	}
-
-    attach_cbpf(sockfd, 0);
-
-    n = 0;
-	while (1) {
-		rc = recv(sockfd, buffer, sizeof(buffer), 0);
-        if (rc < 0)
-            continue;
-
-        ++n;
-        if (n == 10) {
-            __sync_fetch_and_add(&config.reqs, n);
-            n = 0;
-        }
-	}
-
-
-    close(sockfd);
-}
-
 
 static void tcp_echo_one_conn()
 {
@@ -532,18 +453,21 @@ static int thread_create_with_cpu(pthread_t *th, int cpu, void *(*fun)(void *), 
 }
 
 
-static int thread_create(pthread_t *th, int idx, void *(*fun)(void *), void *arg)
+static int thread_create(struct thread *th, int idx, void *(*fun)(void *))
 {
+    th->id = idx;
+
     if (!config.cpu_num) {
-		return pthread_create(th, NULL, fun, arg);
+		return pthread_create(&th->pthread, NULL, fun, th);
     }
 
 
-    thread_create_with_cpu(th, config.cpu_list[idx], fun, arg);
+    thread_create_with_cpu(&th->pthread, config.cpu_list[idx], fun, th);
 }
 
 
 extern struct module mod_udp_send;
+extern struct module mod_udp_recv;
 extern struct module mod_udp_pingpong;
 
 int main(int argc, char *argv[])
@@ -580,7 +504,7 @@ int main(int argc, char *argv[])
 			continue;
 		}
 		if (strcmp(p, "udp_recv") == 0) {
-			mod->thread = udp_recv;
+			mod = &mod_udp_recv;
 			continue;
 		}
 
@@ -693,6 +617,9 @@ int main(int argc, char *argv[])
 		}
 	}
 
+    if (config.thread_n == 1 && config.cpu_num)
+        config.thread_n = config.cpu_num;
+
     if (config.stat) {
         signal(SIGALRM, alarm_handler);
         alarm(1);
@@ -710,6 +637,11 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
+    if (mod->prepare) {
+        if (mod->prepare(NULL))
+            return -1;
+    }
+
     if (config.thread_n == 1) {
         mod->thread(NULL);
         return 0;
@@ -720,17 +652,18 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-	pthread_t *th;
+
+	struct thread *th;
 
     th = malloc(sizeof(*th) * config.thread_n);
 
     memset(th, 0, sizeof(*th) * config.thread_n);
 
+	for (i = 0; i < config.thread_n; ++i) {
+        thread_create(th + i, i, (void *(*)(void*))mod->thread);
+    }
 
 	for (i = 0; i < config.thread_n; ++i)
-        thread_create(th + i, i, (void *(*)(void*))mod->thread, NULL);
-
-	for (i = 0; i < config.thread_n; ++i)
-		pthread_join(th[i], NULL);
+		pthread_join(th[i].pthread, NULL);
 
 }
