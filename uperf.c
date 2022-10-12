@@ -13,18 +13,52 @@ struct config config = {
 static struct module *mod;
 static struct module def;
 
-static void udp_recv()
+#include <linux/filter.h>
+static void attach_cbpf(int fd,uint16_t mod)
 {
-  	int sockfd, rc;
+    struct sock_filter code[] = {
+        /* A = raw_smp_processor_id() */
+        { BPF_LD  | BPF_W | BPF_ABS, 0, 0, SKF_AD_OFF + SKF_AD_CPU },
+        /* return A */
+        { BPF_RET | BPF_A, 0, 0, 0 },
+    };
+    struct sock_fprog p = {
+        .len = 2,
+        .filter = code,
+    };
+
+    mod = mod;
+    if (setsockopt(fd, SOL_SOCKET, SO_ATTACH_REUSEPORT_CBPF, &p, sizeof(p)))
+        perror("socket SO_ATTACH_REUSEPORT_CBPF failed");
+}
+
+static void udp_recv(struct thread *th)
+{
+  	int sockfd, rc, ret;
     char buffer[22];
+    int v = 1;
+    int n;
 
     struct sockaddr_in     servaddr;
 
+    int type;
+
+    type = SOCK_DGRAM;
+    if (config.nonblock)
+        type |= SOCK_NONBLOCK;
+
     // Creating socket file descriptor
-    if ( (sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0 ) {
+    if ( (sockfd = socket(AF_INET, type, 0)) < 0 ) {
         perror("socket creation failed");
         exit(EXIT_FAILURE);
     }
+
+	ret = setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, &v, sizeof(v));
+	if (ret) {
+		printf("SO_REUSEPORT fail. %s\n", strerror(errno));
+		return;
+	}
+
 
     memset(&servaddr, 0, sizeof(servaddr));
 
@@ -35,13 +69,23 @@ static void udp_recv()
 
 	rc = bind(sockfd, (struct sockaddr*)&servaddr, sizeof(servaddr));
 	if (rc < 0) {
+        perror("socket bind failed");
 		return;
 	}
 
+    attach_cbpf(sockfd, 0);
 
+    n = 0;
 	while (1) {
-		recv(sockfd, buffer, sizeof(buffer), 0);
-		__sync_fetch_and_add(&config.reqs, 1);
+		rc = recv(sockfd, buffer, sizeof(buffer), 0);
+        if (rc < 0)
+            continue;
+
+        ++n;
+        if (n == 10) {
+            __sync_fetch_and_add(&config.reqs, n);
+            n = 0;
+        }
 	}
 
 
@@ -223,7 +267,7 @@ static void udp_echo_server()
     close(sockfd);
 }
 
-static void udp_echo(void *_)
+static void udp_echo(struct thread *th)
 {
   	int sockfd;
 	int depth = 0, step, i, ret;
@@ -386,6 +430,118 @@ static void alarm_handler(int sig)
 
 }
 
+static int parse_cpu(char *cpu_mask, int *cpu_list, int num)
+{
+    enum {
+        STAGE_NUM,
+        STAGE_END,
+        STAGE_STEP,
+    }state = STAGE_NUM;
+
+    int cpu = 0, end = 0, step;
+    int idx = 0;
+    char *p;
+    int len;
+
+    len = strlen(cpu_mask);
+
+    for (p = cpu_mask; p - cpu_mask <= len; ++p) {
+        switch(state) {
+        case STAGE_STEP:
+            if (*p <= '9' && *p >= '0') {
+                step = step * 10 + *p - '0';
+                continue;
+            }
+            goto more;
+
+        case STAGE_END:
+            if (*p <= '9' && *p >= '0') {
+                end = end * 10 + *p - '0';
+                continue;
+            }
+
+            step = 1;
+
+            if (*p == ':') {
+                state = STAGE_STEP;
+                step = 0;
+                continue;
+            }
+
+more:
+
+            for (cpu += step; cpu <= end; cpu += step) {
+                if (idx >= num)
+                    return idx;
+
+                cpu_list[idx++] = cpu;
+            }
+            state = STAGE_NUM;
+            cpu = 0;
+            continue;
+
+        case STAGE_NUM:
+            if (*p <= '9' && *p >= '0') {
+                cpu = cpu * 10 + *p - '0';
+                continue;
+            }
+
+            if (idx >= num)
+                return idx;
+
+            cpu_list[idx++] = cpu;
+
+            if (*p == ',') {
+                cpu = 0;
+                continue;
+            }
+
+            if (*p == '-') {
+                end = 0;
+                state = STAGE_END;
+                continue;
+            }
+
+            return idx;
+        }
+    }
+
+    return idx;
+}
+
+static int thread_create_with_cpu(pthread_t *th, int cpu, void *(*fun)(void *), void *arg)
+{
+    pthread_attr_t attr;
+    cpu_set_t cpuset;
+    int ret;
+
+    pthread_attr_init(&attr);
+    CPU_ZERO(&cpuset);
+
+    CPU_SET(cpu, &cpuset);
+
+    ret = pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &cpuset);
+    if (ret != 0) {
+        printf("pthread_attr_setaffinity_np\n");
+        return ret;
+    }
+
+    ret = pthread_create(th, &attr, fun, arg);
+
+    return ret;
+}
+
+
+static int thread_create(pthread_t *th, int idx, void *(*fun)(void *), void *arg)
+{
+    if (!config.cpu_num) {
+		return pthread_create(th, NULL, fun, arg);
+    }
+
+
+    thread_create_with_cpu(th, config.cpu_list[idx], fun, arg);
+}
+
 
 extern struct module mod_udp_send;
 extern struct module mod_udp_pingpong;
@@ -449,7 +605,12 @@ int main(int argc, char *argv[])
 		}
 
 		if (strcmp(p, "--stat") == 0) {
-			config.flag_confirm = 1;
+			config.stat = 1;
+			continue;
+		}
+
+		if (strcmp(p, "--nonblock") == 0) {
+			config.nonblock = 1;
 			continue;
 		}
 
@@ -488,6 +649,14 @@ int main(int argc, char *argv[])
 		}
 		if (strcmp(p, "--channel") == 0) {
 			config.channel = atoi(v);
+			continue;
+		}
+		if (strcmp(p, "--cpu") == 0) {
+            config.cpu_num = parse_cpu(v, config.cpu_list, sizeof(config.cpu_list)/sizeof(config.cpu_list[0]));
+            if (config.cpu_num < 0) {
+                printf("cpu parse error\n");
+                return -1;
+            }
 			continue;
 		}
 		if (strcmp(p, "--rate") == 0) {
@@ -546,10 +715,20 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-	pthread_t th[100] = {0};
+    if (config.cpu_num && config.cpu_num < config.thread_n) {
+        printf("cpu num too less then thread num.\n");
+        return -1;
+    }
+
+	pthread_t *th;
+
+    th = malloc(sizeof(*th) * config.thread_n);
+
+    memset(th, 0, sizeof(*th) * config.thread_n);
+
 
 	for (i = 0; i < config.thread_n; ++i)
-		pthread_create(th + i, NULL, (void *(*)(void*))mod->thread, NULL);
+        thread_create(th + i, i, (void *(*)(void*))mod->thread, NULL);
 
 	for (i = 0; i < config.thread_n; ++i)
 		pthread_join(th[i], NULL);

@@ -2,7 +2,7 @@
 
 #define buf "uperf test test test\n"
 
-static void udp_pingpong(void *_)
+static void udp_pingpong(struct thread *th)
 {
   	int sockfd;
 	int depth = 0, step, i, ret;

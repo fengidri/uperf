@@ -1,5 +1,8 @@
 #ifndef  __UPERF_H__
 #define __UPERF_H__
+
+#define _GNU_SOURCE	       /* See feature_test_macros(7) */
+
 #include <sys/types.h>	       /* See NOTES */
 #include <sys/socket.h>
 #include <stdio.h>
@@ -17,6 +20,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <stdbool.h>
+#include <sched.h>
 
 #include <pthread.h>
 #include <time.h>
@@ -34,12 +38,12 @@ struct config{
 	int conn_n;
 	int channel;
 
-	int reqs_last;
     int udp_connect;
     int sendmsg;
     int sendmmsg;
     int stat;
 
+	u64 reqs_last;
 	u64 reqs;
     u64 spent;
 
@@ -54,17 +58,27 @@ struct config{
     u32 start;
     u32 time;
 
+    int cpu_list[300];
+    int cpu_num;
+
     u32 flags;
     bool flag_oob;
     bool flag_probe;
     bool flag_confirm;
+    bool nonblock;
 };
 extern struct config config;
+
+struct thread {
+    int id;
+    void *data;
+
+};
 
 
 struct module{
 	void (*start)(void*);
-	void (*thread)(void*);
+	void (*thread)(struct thread *);
 	void (*alarm)(void*);
 };
 
