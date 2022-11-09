@@ -67,13 +67,16 @@ struct config{
     bool flag_confirm;
     bool nonblock;
 };
+
 extern struct config config;
+extern struct thread *threads;
 
 struct thread {
 	pthread_t pthread;
     int id;
     void *data;
-
+	u64 reqs;
+    char padding[128];
 };
 
 
@@ -81,7 +84,7 @@ struct module{
     int (*args)(int args, char *argv[]);
 	int (*prepare)(void*);
 	void (*thread)(struct thread *);
-	void (*alarm)(void*);
+	void (*stat)(void*);
 };
 
 

@@ -11,6 +11,8 @@ struct config config = {
     .server = "0.0.0.0",
 };
 
+struct thread *threads;
+
 static struct module *mod;
 static struct module def;
 
@@ -317,8 +319,8 @@ static void alarm_handler(int sig)
     u64 latency;
     static struct timeval now, last;
 
-    if (mod->alarm) {
-        mod->alarm(NULL);
+    if (mod->stat) {
+        mod->stat(NULL);
 	    alarm(1);
         return;
     }
@@ -483,6 +485,7 @@ int parse_args(int argc, char *argv[])
 
             if (mod->args(argc - i - 1, argv + i + 1))
                 return -1;
+            break;
 		}
 
 		if (strcmp(p, "udp_send") == 0) {
@@ -676,6 +679,8 @@ int main(int argc, char *argv[])
 	struct thread *th;
 
     th = malloc(sizeof(*th) * config.thread_n);
+
+    threads = th;
 
     memset(th, 0, sizeof(*th) * config.thread_n);
 

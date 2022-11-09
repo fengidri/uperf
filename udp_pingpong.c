@@ -88,6 +88,6 @@ static void udp_pingpong_alarm(void *_)
 
 struct module mod_udp_pingpong = {
 	.thread = udp_pingpong,
-    .alarm = udp_pingpong_alarm,
+    .stat = udp_pingpong_alarm,
 };
 
